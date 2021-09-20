@@ -11,7 +11,7 @@ import pandas as pd
 # the members in the room
 intents = discord.Intents().all()
 
-client = commands.Bot(command_prefix = '??', case_insensitive = True, intents = intents)
+client = commands.Bot(command_prefix = '??', case_insensitive = True, intents = intents, help_command = None)
 # Pointer that point to the player of the time in memids
 turn = 0
 # This variable controlls in which turn the game is
@@ -25,35 +25,45 @@ global h_qtn_df
 h_qtn_df = len(list(qtn_df.index))
 
 # TEST
-global memids, mem_vc_id
+global memids, mem_vc_id, votes
+# Stores the members in the game
+memids    = []
 # Stores the members ids in the voice channel
-memids = []
 mem_vc_id = []
+votes     = []
 
-global vc_channel_id, txt_channel_id, last_ctx, bot_master
+global vc_channel_id, txt_channel_id, vote_msg_id, last_ctx, master_ctx, bot_master
 # It get the channel with id informed
-vc_channel_id = 
-txt_channel_id = 
+vc_channel_id   = 
+txt_channel_id  = 
+vote_msg_id     = None
 auth_channel_id = 
-auth_msg_id =  
-last_ctx = None
-bot_master = 
-# async def counter(time, message):
-#   reactions_count = ["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-#   if time < 0:
-#     time = 0
-#   elif time > 10:
-#     time = 10
-  
-#   for i in range(len(reactions_count)-1, -1, -1):
-#     message.add_reaction(reactions_count[i])
-#     sleep(time)
-#     message.clear_reaction(reactions_count[i])
+auth_msg_id     = 
+
+last_ctx        = None
+master_ctx      = None 
+# Person who controll the bot
+bot_master      = 
 
 # Shows when bot is ready to be used (hehe)
 @client.event
 async def on_ready():
+  global auth_msg_id, auth_channel_id
+  channel = client.get_channel(auth_channel_id)
+  message = await channel.fetch_message(auth_msg_id)
+  await message.clear_reaction("👍")
+  await message.add_reaction("👍")  
   print(f'Tamo dentro.\nP.s.: {client.user}')
+
+@client.event
+async def close():
+  global auth_msg_id, auth_channel_id
+  channel = client.get_channel(auth_channel_id)
+  print('ME DERRUBARAM AQUI!')
+  message = await channel.fetch_message(auth_msg_id)
+  await message.clear_reaction("👍")
+  await message.add_reaction("👍")
+
 
 @client.event
 async def on_message(message):
@@ -71,10 +81,12 @@ async def on_message(message):
 
 @client.event
 async def on_raw_reaction_add(payload):
-  global memids, mem_vc_id, auth_msg_id, auth_channel_id, vc_channel_id
+  global memids, mem_vc_id, auth_msg_id, auth_channel_id, vc_channel_id, vote_msg_id, votes, victim
   voice_channel = client.get_channel(vc_channel_id)
   # Get members in the voice channel
   members = voice_channel.members
+  channel = client.get_channel(payload.channel_id)
+  message = await channel.fetch_message(payload.message_id)
 
   for member in members:
       if member.id not in mem_vc_id:
@@ -89,15 +101,32 @@ async def on_raw_reaction_add(payload):
         memids.append(payload.user_id)
         await user.send(f'<@{payload.user_id}>, agora você está no jogo.')
     # If not, remove its reaction
+    elif payload.user_id == client.user.id:
+          pass
     else:
-        channel = client.get_channel(payload.channel_id)
-        message = await channel.fetch_message(payload.message_id)
         await message.remove_reaction("👍", user)
         await user.send(f'<@{payload.user_id}>, você precisa estar no canal de voz para participar.')
+  
+  if payload.message_id == vote_msg_id and payload.user_id != client.user.id:
+    if payload.user_id in memids and payload.user_id not in votes and payload.user_id != victim:
+      votes.append(payload.user_id)
+    # if is not in the play, it can't vote
+    else:
+      try:
+        await message.remove_reaction(payload.emoji.name, user)
+      except:
+        await message.remove_reaction(payload.emoji.name, user)
+        
+
+    if payload.user_id == victim:
+      try:
+        await message.remove_reaction(payload.emoji.name, user)
+      except:
+        await message.remove_reaction(payload.emoji.name, user)
 
 @client.event
 async def on_raw_reaction_remove(payload):
-  global memids, mem_vc_id, auth_msg_id
+  global memids, mem_vc_id, auth_msg_id, votes
   user = client.get_user(payload.user_id)
   # If it is auth message
   if payload.message_id == auth_msg_id:
@@ -106,14 +135,19 @@ async def on_raw_reaction_remove(payload):
       if payload.user_id in memids:
         memids.remove(payload.user_id)
         await user.send(f'<@{payload.user_id}>, você não pode sair do jogo. Vai pagar por isso!😈')
+  
+  if payload.message_id == vote_msg_id and payload.user_id != client.user.id:
+    if payload.emoji.name in ["👍", "👎"] and payload.user_id in votes:
+      votes.remove(payload.user_id)
+      
 
 
 @client.event
 async def on_voice_state_update(ctx, before, after):
-    global memids, mem_vc_id, victim, ctrl, turn, txt_channel_id, vc_channel_id, auth_msg_id, last_ctx, asker, victim
-    user = ctx.id
+    global memids, mem_vc_id, victim, ctrl, turn, txt_channel_id, vc_channel_id, auth_msg_id, master_ctx, asker, victim
+    user          = ctx.id
     voice_channel = client.get_channel(vc_channel_id)
-    txt_channel = client.get_channel(txt_channel_id)
+    txt_channel   = client.get_channel(txt_channel_id)
     # Get inside
     b = str(before.channel)
     a = str(after.channel)
@@ -128,7 +162,7 @@ async def on_voice_state_update(ctx, before, after):
         mem_vc_id.remove(user)
         channel = client.get_channel(auth_channel_id)
         message = await channel.fetch_message(auth_msg_id)
-        user_g = client.get_user(user)
+        user_g  = client.get_user(user)
         await message.remove_reaction("👍", user_g)
       # If this user is in the players list, it takes
       # it off
@@ -140,18 +174,19 @@ async def on_voice_state_update(ctx, before, after):
         try:
           if user == victim:
             await txt_channel.send(f'Nossa vítima <@{user}> saiu da sala. Vamos reiniciar a rodada.')
-            ctrl = 0
-            turn -= 1
+            ctrl   = 0
+            turn  -= 1
             victim = None
-            await iniciar(last_ctx)
+            await iniciar(master_ctx)
               
           elif user == asker:
             await txt_channel.send(f'Aquele que pergunta saiu da sala. Vamos reiniciar a rodada.')
-            ctrl = 0
+            ctrl  = 0
             asker = None
-            await iniciar(last_ctx)
+            await iniciar(master_ctx)
         except:
           pass
+        
                 
 # Starts the turn
 @client.command()
@@ -168,27 +203,16 @@ async def show_list(ctx):
 # Starts the turn
 @client.command()
 async def iniciar(ctx):
-  global ctrl, memids, vc_channel_id, last_ctx
-  last_ctx = ctx
+  global ctrl, memids, vc_channel_id, last_ctx, bot_master, master_ctx
   caller = ctx.author.id
-  if caller in memids:
+  if caller == bot_master:
+    master_ctx = ctx
     if ctrl == 0:
       if len(memids) > 1:
-        # Id in balletests = 859232339519602729
-        # Id in my server = 774455062491693110
         # It get the channel with id informed
         voice_channel = client.get_channel(vc_channel_id)
         # Get members in the voice channel
         members = voice_channel.members
-        # global victim
-        # TEST
-        # # Stores the members ids in the voice channel
-        # memids = [] 
-
-        # for member in members:
-        #     if member.id not in memids:
-        #       memids.append(member.id)
-
 
         global asker
         global turn
@@ -213,6 +237,26 @@ async def iniciar(ctx):
         await ctx.send(f'A partida não pode começar com menos de 2 jogadores.')      
     else:
       await ctx.send(f'<@{caller}>, você não pode iniciar um novo jogo nesse momento.')
+  else:
+      await ctx.send(f'<@{caller}>, você não pode iniciar um novo jogo.')
+    
+# Iniciar aliases ########################
+@client.command()
+async def inicia(ctx):
+  await iniciar(ctx)
+
+@client.command()
+async def começa(ctx):
+  await iniciar(ctx)
+
+@client.command()
+async def comeca(ctx):
+  await iniciar(ctx)
+
+@client.command()
+async def play(ctx):
+  await iniciar(ctx)
+##########################################
 
 @client.command()
 async def girar(ctx):
@@ -240,6 +284,24 @@ async def girar(ctx):
     else:
         await ctx.send(f'<@{caller}>, você não pode girar a garrafa nesse momento.')
 
+# Iniciar aliases ########################
+@client.command()
+async def gira(ctx):
+  await girar(ctx)
+
+@client.command()
+async def rodar(ctx):
+  await girar(ctx)
+
+@client.command()
+async def roda(ctx):
+  await girar(ctx)
+
+@client.command()
+async def spin(ctx):
+  await girar(ctx)
+##########################################
+
 # Command to choose if it's verdade or consequencia
 @client.command()
 async def op(ctx, op):
@@ -265,6 +327,19 @@ async def op(ctx, op):
         await ctx.send(f'<@{caller}>, não é sua vez de escolher.')
     else:
       await ctx.send(f'<@{caller}>, você não pode escolher uma opção agora.')
+# op aliases ########################
+@client.command()
+async def option(ctx, opt):
+  await op(ctx, opt)
+
+@client.command()
+async def opção(ctx, opt):
+  await op(ctx, opt)
+
+@client.command()
+async def opcao(ctx, opt):
+  await op(ctx, opt)
+####################################
 
 # Command to be used when asker doesn't know what to ask
 @client.command()
@@ -285,11 +360,21 @@ async def ajuda(ctx):
         await ctx.send(f'<@{caller}>, você não pode pedir ajuda agora.')
     else:
       await ctx.send(f'<@{caller}>, você não pode pedir ajuda agora.')
+# ajuda aliases ########################
+@client.command()
+async def ajd(ctx):
+  await ajuda(ctx)
+
+@client.command()
+async def help(ctx):
+  await ajuda(ctx)
+########################################
 
 # Command to be used when the challenge or the answer is done
 @client.command()
 async def feito(ctx):
-  global ctrl
+  global ctrl, memids, victim, vote_msg_id, votes, master_ctx
+  vote_members = []
   caller = ctx.author.id
   if caller in memids:
     if ctrl == 3:
@@ -298,23 +383,33 @@ async def feito(ctx):
         message = await ctx.send("Vocês acreditam nesse cara?")
         await message.add_reaction("👍")
         await message.add_reaction("👎")
+        vote_msg_id = message.id
+
         # Wait 10 seconds to finish the vote
         reactions_count = ["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
         for i in range(len(reactions_count)-1, -1, -1):
           await message.add_reaction(reactions_count[i])
+          # if all the players already voted, stop votes 
+          if len(votes) == len(memids) - 1:
+            try:
+              await message.clear_reaction(reactions_count[i])
+              break
+            except:
+              await message.clear_reaction(reactions_count[i])
+              break
           sleep(1)
           await message.clear_reaction(reactions_count[i])
 
-        # Gets the reactions (votes)
         updated_message = await ctx.channel.fetch_message(message.id)
 
-        positive = negative = 0
+        positive = negative = 0 
         # Counts the votes
         for r in updated_message.reactions:
             if str(r) == "👍":
                 positive = r.count
             elif str(r) == "👎":
                 negative = r.count
+
         # Verifies results
         if positive > negative:
               await ctx.send(f'<@{victim}>, as pessoas acreditaram em você.\nVocê ganhou x coins.')
@@ -323,13 +418,19 @@ async def feito(ctx):
         else:
               await ctx.send(f'<@{victim}>, as pessoas ficaram na Dúvida.\nVocê falhou.')
         ctrl = 0
+        votes = []
         # Starts a new round after 1s
         sleep(1)
-        await iniciar(ctx)
+        await iniciar(master_ctx)
       else:
         await ctx.send(f'<@{caller}>, você não pode responder agora.')
     else:
       await ctx.send(f'<@{caller}>, você não pode responder agora.')
+# feito aliases ########################
+@client.command()
+async def done(ctx):
+  await feito(ctx)
+########################################
 
 # Restarts the game
 @client.command()
@@ -337,24 +438,41 @@ async def reload(ctx):
   global ctrl, turn, bot_master, asker, victim
   caller = ctx.author.id
   if caller == bot_master:
-    ctrl = turn = 0
+    ctrl   = turn  = 0
     victim = asker = None
 
 # Just the game rules
 @client.command()
 async def regras(ctx):
   rules = 'Olá! Vamos brincar de uma brincadeira bem divertida? 😈\n'
+  rules += 'Prefixo: ` ?? `'
   rules += 'Comandos:\n\n'
-  rules += '`??iniciar` - Inicia uma nova partida. Não é possível iniciar enquanto uma outra estiver acontecendo.\n'
-  rules += '`??girar` - Sorteia quem irá desafiar quem.\n'
-  rules += '`??op` - Escolhe qual das opções a vítima quer. Use `v` ou `c` para escolher.\n'
-  rules += '`??ajuda` - Não sabe o que perguntar? Use esse comando que Calux vai te ajudar.\n'
-  rules += '`??feito` - A vítima deve usar esse comando quando tiver respondido ou cumprido seu desafio\n\n'
-  rules += 'Lembrando que os desafios devem ser provados com uma fotinha ou um vídeo curto. As pessoas decidirão se acreditam ou não.\n\n'
+  rules += f'` {"iniciar | comeca | começa | play ":>35}` - Inicia uma nova partida. Não é possível iniciar enquanto uma outra estiver acontecendo.\n'
+  rules += f'` {"girar | gira | rodar | roda ":>35}` - Sorteia quem irá desafiar quem.\n'
+  rules += f'` {"op | opcao | opção | option ":>35}` - Escolhe qual das opções a vítima quer. Use `v` ou `c` para escolher.\n'
+  rules += f'` {"ajuda | ajd | help ":>35}` - Não sabe o que perguntar? Use esse comando que Calux vai te ajudar.\n'
+  rules += f'` {"feito | done ":>35}` - A vítima deve usar esse comando quando tiver respondido ou cumprido seu desafio\n'
+  rules += f'` {"regras | regra | rule | rules ":>35}` - Mostra os como jogar e os comandos do bot.\n\n'
+  rules += 'Lembrando que os desafios podem ser provados com uma fotinha, um vídeo curto ou mostrando na call. As pessoas decidirão se acreditam ou não.\n\n'
   rules += 'Vamos começar! 😈'
   caller = ctx.author.id
   if caller in memids:
     await ctx.send(f'{rules}')
+
+# regras aliases ########################
+@client.command()
+async def regra(ctx):
+  await regras(ctx)
+
+@client.command()
+async def rules(ctx):
+  await regras(ctx)
+
+@client.command()
+async def rule(ctx):
+  await regras(ctx)
+########################################
+
 
 @client.command()
 async def add_message(ctx):
